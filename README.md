@@ -178,3 +178,10 @@ Deletes all stacks (including Amplify, DynamoDB, everything) in reverse dependen
 ## License
 
 MIT
+
+## Author
+
+**Utkarsh Rastogi**
+
+- LinkedIn: [your-linkedin-url]
+- Dev.to: https://dev.to/awslearnerdaily
