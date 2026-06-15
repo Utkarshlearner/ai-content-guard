@@ -183,5 +183,5 @@ MIT
 
 **Utkarsh Rastogi**
 
-- LinkedIn: [your-linkedin-url]
+- LinkedIn: https://www.linkedin.com/in/rastogiutkarsh/
 - Dev.to: https://dev.to/awslearnerdaily
