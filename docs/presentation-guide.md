@@ -158,8 +158,7 @@ Same patterns used by: Netflix, Swiggy, CRED, Instagram
 ---
 
 ## Slide 10: Thank You + Try It Yourself (4 min)
-**App URL:** [Amplify URL]  
-**GitHub:** [repo link]  
+**App URL:** https://main.d1244888rwbz47.amplifyapp.com
 **Sample prompts:** `docs/sample-prompts.txt`
 
 **❓ Ask:** "If you had to add ONE feature, what would it be?"  
