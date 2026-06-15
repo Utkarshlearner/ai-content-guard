@@ -1,0 +1,287 @@
+# AI Content Guard - Architecture Document
+
+## Overview
+
+AI Content Guard is a serverless AI-powered text summarization application with built-in content safety guardrails. It accepts user text via a React frontend, processes it through AWS Lambda with Amazon Bedrock for summarization, and applies Amazon Bedrock Guardrails to block harmful, abusive, and PII-containing content.
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              AWS Cloud (us-east-1)                           │
+│                                                                             │
+│  ┌─────────────┐     ┌──────────────────┐     ┌─────────────────────────┐  │
+│  │   Amplify   │     │   API Gateway    │     │     Lambda Function     │  │
+│  │  (Frontend) │────▶│  (REST API)      │────▶│     (Python 3.12)       │  │
+│  │             │◀────│  POST /summarize  │◀────│                         │  │
+│  └─────────────┘     └──────────────────┘     └────────────┬────────────┘  │
+│                                                             │               │
+│                       ┌─────────────────────────────────────┼─────────┐     │
+│                       │                                     │         │     │
+│              ┌────────▼────────┐   ┌───────────────┐   ┌───▼───────┐ │     │
+│              │ Bedrock         │   │   Bedrock     │   │ DynamoDB  │ │     │
+│              │ Guardrails      │   │   Nova Lite   │   │ (Logs)    │ │     │
+│              │ (Content Safety)│   │   (Summary)   │   │           │ │     │
+│              └────────┬────────┘   └───────────────┘   └───────────┘ │     │
+│                       │                                               │     │
+│              ┌────────▼────────┐                                      │     │
+│              │ SSM Parameter   │                                      │     │
+│              │ Store (Config)  │──────────────────────────────────────┘     │
+│              └─────────────────┘                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## AWS Services Used
+
+| Service | Purpose | Documentation |
+|---------|---------|---------------|
+| AWS Lambda | Serverless compute for text processing | [Lambda Developer Guide](https://docs.aws.amazon.com/lambda/latest/dg/services-apigateway.html) |
+| Amazon Bedrock | AI model invocation (Nova Lite) | [Bedrock User Guide](https://docs.aws.amazon.com/bedrock/latest/userguide/) |
+| Amazon Bedrock Guardrails | Content filtering, PII detection | [Guardrails Sensitive Filters](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html) |
+| Amazon API Gateway | REST API endpoint with CORS | [API Gateway CORS](https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html) |
+| Amazon DynamoDB | Request/response logging | [DynamoDB PITR](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html) |
+| AWS SSM Parameter Store | Runtime configuration for guardrail | [SSM Parameter Store](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html) |
+| AWS Amplify Hosting | Static site hosting for React UI | [Amplify Hosting](https://docs.aws.amazon.com/amplify/latest/userguide/deploy--from-amplify-console.html) |
+| AWS CloudFormation | Infrastructure as Code | [CloudFormation Lambda](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-lambda-function.html) |
+
+## Request Flow
+
+### Successful Summarization
+
+```
+1. User types text in React UI
+2. Frontend POSTs to API Gateway /summarize
+3. API Gateway invokes Lambda (proxy integration)
+4. Lambda fetches guardrail config from SSM (cached on cold start)
+5. Lambda applies Bedrock Guardrail on INPUT text
+   → Result: NONE (content is safe)
+6. Lambda invokes Bedrock Nova Lite model for summarization
+7. Lambda applies Bedrock Guardrail on OUTPUT summary
+   → Result: NONE (summary is safe)
+8. Lambda saves record to DynamoDB (30-day TTL)
+9. Lambda returns 200 with summary
+10. Frontend displays green success card
+```
+
+### Blocked Content
+
+```
+1. User types harmful/PII text in React UI
+2. Frontend POSTs to API Gateway /summarize
+3. API Gateway invokes Lambda (proxy integration)
+4. Lambda applies Bedrock Guardrail on INPUT text
+   → Result: GUARDRAIL_INTERVENED (content blocked)
+   → Violations extracted (category, type, confidence)
+5. Lambda saves blocked record to DynamoDB
+6. Lambda returns 422 with violation details
+7. Frontend displays red blocked card with violation types
+```
+
+## Infrastructure Design
+
+### Separation of Concerns
+
+Each AWS resource is deployed as an independent CloudFormation stack. This enables:
+- Independent updates without affecting other resources
+- Granular rollback per component
+- Clear ownership and tagging per resource
+- Parallel development across team members
+
+### Deployment Order & Dependencies
+
+```
+Stack 1: dynamodb      ─┐
+Stack 2: guardrail     ─┼──▶ Stack 3: iam-role ──▶ Stack 4: lambda ──▶ Stack 5: api-gateway ──▶ Stack 6: amplify
+                        │
+                        └─── (ARNs passed as parameters)
+```
+
+### SSM Parameter Store Strategy
+
+Configuration that the Lambda needs at runtime is stored in SSM rather than passed as CloudFormation parameters to the Lambda environment variables. This provides:
+
+- **Decoupled updates** — Update guardrail version in SSM without redeploying Lambda
+- **Single source of truth** — All consumers read the same parameter
+- **Audit trail** — SSM provides version history and change tracking
+
+| Parameter | Writer | Reader |
+|-----------|--------|--------|
+| `/ai-content-guard/guardrail/id` | guardrail.yaml | Lambda (runtime) |
+| `/ai-content-guard/guardrail/version` | guardrail.yaml | Lambda (runtime) |
+| `/ai-content-guard/guardrail/arn` | guardrail.yaml | Reference |
+| `/ai-content-guard/amplify/app-id` | amplify.yaml | deploy-frontend.sh |
+
+### Lambda Design
+
+The Lambda function uses inline code via CloudFormation's `Code.ZipFile` property. This is suitable because:
+- The function is a single Python file (~150 lines)
+- No external dependencies (only `boto3` which is in the Lambda runtime)
+- No S3 bucket needed for deployment artifacts
+- Code changes deploy instantly via `cloudformation deploy`
+
+Reference: [AWS::Lambda::Function Code](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-lambda-function-code.html)
+
+### API Gateway Integration
+
+The API uses **Lambda proxy integration** (`AWS_PROXY`). API Gateway passes the complete HTTP request to Lambda as an event object, and Lambda returns a structured response with statusCode, headers, and body.
+
+Reference: [Lambda Proxy Integration](https://docs.aws.amazon.com/lambda/latest/dg/services-apigateway.html)
+
+Response format from Lambda:
+```json
+{
+  "statusCode": 200,
+  "headers": {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*"
+  },
+  "body": "{\"status\": \"success\", \"summary\": \"...\"}"
+}
+```
+
+### DynamoDB Table Design
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| `requestId` (PK) | String | Unique request identifier |
+| `createdAt` (SK) | String | ISO timestamp for ordering |
+| `inputText` | String | Truncated input (first 1000 chars) |
+| `summary` | String | Generated summary (if successful) |
+| `status` | String | SUCCESS / BLOCKED_INPUT / BLOCKED_OUTPUT |
+| `guardrailAction` | String | GUARDRAIL_INTERVENED / NONE |
+| `ttl` | Number | Auto-delete after 30 days |
+
+Features enabled:
+- **PAY_PER_REQUEST** — No capacity planning needed
+- **SSE** — Server-side encryption at rest
+- **PITR** — Point-in-time recovery for data protection
+- **TTL** — Automatic cleanup of old records
+
+Reference: [DynamoDB Point-in-time Recovery](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html)
+
+## Content Safety
+
+### Bedrock Guardrails Configuration
+
+The guardrail applies to both INPUT (user text) and OUTPUT (generated summary):
+
+**Content Filters (HIGH strength on input & output):**
+| Category | Input | Output |
+|----------|-------|--------|
+| SEXUAL | HIGH | HIGH |
+| VIOLENCE | HIGH | HIGH |
+| HATE | HIGH | HIGH |
+| INSULTS | HIGH | HIGH |
+| MISCONDUCT | HIGH | HIGH |
+| PROMPT_ATTACK | HIGH | NONE |
+
+**PII Handling:**
+| PII Type | Action |
+|----------|--------|
+| EMAIL | ANONYMIZE |
+| PHONE | ANONYMIZE |
+| NAME | ANONYMIZE |
+| US_SOCIAL_SECURITY_NUMBER | BLOCK |
+| CREDIT_DEBIT_CARD_NUMBER | BLOCK |
+
+Reference: [Bedrock Guardrails Sensitive Information Filters](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html)
+
+## Frontend Architecture
+
+### Tech Stack
+- **React 19** — UI components
+- **Vite 8** — Build tool and dev server
+- **Plain CSS** — No framework, CSS variables for theming
+
+### Key Features
+- Auto-retry on 5xx errors (2 retries, 1s/2s backoff)
+- Dark mode via `prefers-color-scheme` media query
+- Responsive layout (mobile-first)
+- Character counter with max validation
+- Result cards with status-specific styling
+
+### Hosting
+- AWS Amplify Hosting (manual ZIP deployment)
+- SPA rewrite rule for client-side routing
+- `VITE_API_URL` baked in at build time
+
+## Security
+
+### IAM (Least Privilege)
+
+The Lambda execution role has only the permissions it needs:
+
+| Policy | Permissions | Scope |
+|--------|-------------|-------|
+| AWSLambdaBasicExecutionRole | CloudWatch Logs | Managed policy |
+| dynamodb-policy | PutItem, GetItem, Query | Table ARN only |
+| bedrock-policy | InvokeModel | Foundation models + inference profiles |
+| bedrock-policy | ApplyGuardrail | Specific guardrail ARN only |
+| ssm-policy | GetParameter, GetParameters | `/ai-content-guard/guardrail/*` only |
+
+### API Gateway
+- Regional endpoint (no edge locations)
+- Throttling: 100 req/s rate, 50 burst
+- CORS configured for cross-origin access
+
+### DynamoDB
+- Server-side encryption (SSE) enabled
+- Input text truncated to 1000 chars before storage
+- 30-day TTL auto-deletes records
+
+## Tagging Strategy
+
+All resources tagged consistently for cost allocation, ownership, and governance:
+
+| Tag | Value | Purpose |
+|-----|-------|---------|
+| Project | ai-content-guard | Cost allocation |
+| Environment | production | Environment separation |
+| Owner | utkarsh | Ownership |
+| ManagedBy | CloudFormation | Drift detection |
+| Application | AI-Content-Guard | Application grouping |
+
+## Cost Considerations
+
+| Service | Pricing Model | Estimated Cost (low traffic) |
+|---------|--------------|------------------------------|
+| Lambda | Per invocation + duration | ~$0.00 (free tier: 1M requests/month) |
+| Bedrock Nova Lite | Per token | ~$0.001 per request |
+| Bedrock Guardrails | Per assessment | ~$0.001 per assessment |
+| DynamoDB | Per request | ~$0.00 (free tier: 25 WCU/RCU) |
+| API Gateway | Per request | ~$0.00 (free tier: 1M calls/month) |
+| Amplify Hosting | Per GB served | ~$0.00 (free tier: 15 GB/month) |
+
+## Monitoring & Observability
+
+### Lambda Logging
+
+Structured logs with request ID correlation:
+```
+[request_id] Request received
+[request_id] Input length: 330 chars
+[request_id] Step 1: Applying input guardrail
+[request_id] Input guardrail result: action=NONE, violations=0
+[request_id] Step 2: Invoking model amazon.nova-lite-v1:0
+[request_id] Summary generated: 180 chars
+[request_id] Step 3: Applying output guardrail
+[request_id] Step 4: Saving to DynamoDB
+[request_id] ✓ SUCCESS | summary_length=180
+```
+
+### CloudWatch Log Group
+- Retention: 14 days
+- Log group: `/aws/lambda/ai-content-guard-summarizer`
+
+## Deployment
+
+```bash
+# Deploy all infrastructure
+./deploy.sh all
+
+# Deploy frontend to Amplify
+./deploy-frontend.sh
+
+# Destroy everything
+./destroy.sh
+```

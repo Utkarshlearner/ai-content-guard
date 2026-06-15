@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: DynamoDB table for AI Content Guard request/response logging
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ai-content-guard
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+      - development
+  Owner:
+    Type: String
+    Default: utkarsh
+
+Resources:
+  SummaryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub '${ProjectName}-summaries'
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: requestId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: requestId
+          KeyType: HASH
+        - AttributeName: createdAt
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Application
+          Value: AI-Content-Guard
+
+Outputs:
+  SummaryTableName:
+    Description: Name of the DynamoDB table
+    Value: !Ref SummaryTable
+    Export:
+      Name: !Sub '${ProjectName}-table-name'
+  SummaryTableArn:
+    Description: ARN of the DynamoDB table
+    Value: !GetAtt SummaryTable.Arn
+    Export:
+      Name: !Sub '${ProjectName}-table-arn'

@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Amazon Bedrock Guardrail for content safety filtering
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ai-content-guard
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+      - development
+  Owner:
+    Type: String
+    Default: utkarsh
+
+Resources:
+  ContentGuardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Sub '${ProjectName}-guardrail'
+      Description: Blocks harmful, abusive, and PII content for the AI summarizer
+      BlockedInputMessaging: 'Your input contains content that violates our safety policy. Please revise and try again.'
+      BlockedOutputsMessaging: 'The generated summary was blocked due to safety policy violations.'
+      ContentPolicyConfig:
+        FiltersConfig:
+          - Type: SEXUAL
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: VIOLENCE
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: HATE
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: INSULTS
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: MISCONDUCT
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: PROMPT_ATTACK
+            InputStrength: HIGH
+            OutputStrength: NONE
+      SensitiveInformationPolicyConfig:
+        PiiEntitiesConfig:
+          - Type: EMAIL
+            Action: ANONYMIZE
+          - Type: PHONE
+            Action: ANONYMIZE
+          - Type: NAME
+            Action: ANONYMIZE
+          - Type: US_SOCIAL_SECURITY_NUMBER
+            Action: BLOCK
+          - Type: CREDIT_DEBIT_CARD_NUMBER
+            Action: BLOCK
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Application
+          Value: AI-Content-Guard
+
+  GuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties:
+      GuardrailIdentifier: !GetAtt ContentGuardrail.GuardrailId
+      Description: Initial version
+
+  # SSM Parameters for Guardrail ID and Version
+  GuardrailIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/guardrail/id'
+      Type: String
+      Value: !GetAtt ContentGuardrail.GuardrailId
+      Description: Bedrock Guardrail ID for AI Content Guard
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+        Owner: !Ref Owner
+        ManagedBy: CloudFormation
+        Application: AI-Content-Guard
+
+  GuardrailVersionParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/guardrail/version'
+      Type: String
+      Value: !GetAtt GuardrailVersion.Version
+      Description: Bedrock Guardrail version for AI Content Guard
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+        Owner: !Ref Owner
+        ManagedBy: CloudFormation
+        Application: AI-Content-Guard
+
+  GuardrailArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/guardrail/arn'
+      Type: String
+      Value: !GetAtt ContentGuardrail.GuardrailArn
+      Description: Bedrock Guardrail ARN for AI Content Guard
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+        Owner: !Ref Owner
+        ManagedBy: CloudFormation
+        Application: AI-Content-Guard
+
+Outputs:
+  GuardrailId:
+    Description: ID of the Bedrock Guardrail
+    Value: !GetAtt ContentGuardrail.GuardrailId
+    Export:
+      Name: !Sub '${ProjectName}-guardrail-id'
+  GuardrailArn:
+    Description: ARN of the Bedrock Guardrail
+    Value: !GetAtt ContentGuardrail.GuardrailArn
+    Export:
+      Name: !Sub '${ProjectName}-guardrail-arn'
+  GuardrailVersion:
+    Description: Version of the Bedrock Guardrail
+    Value: !GetAtt GuardrailVersion.Version
+    Export:
+      Name: !Sub '${ProjectName}-guardrail-version'
+  GuardrailIdSSMParam:
+    Description: SSM Parameter path for Guardrail ID
+    Value: !Sub '/${ProjectName}/guardrail/id'
+  GuardrailVersionSSMParam:
+    Description: SSM Parameter path for Guardrail Version
+    Value: !Sub '/${ProjectName}/guardrail/version'

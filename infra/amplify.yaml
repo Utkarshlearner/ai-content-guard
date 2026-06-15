@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Amplify Hosting for AI Content Guard frontend
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ai-content-guard
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+      - development
+  Owner:
+    Type: String
+    Default: utkarsh
+  ApiUrl:
+    Type: String
+    Description: API Gateway endpoint URL for the backend
+
+Resources:
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      Name: !Sub '${ProjectName}-frontend'
+      Description: AI Content Guard - React frontend for text summarization with safety guardrails
+      Platform: WEB
+      EnvironmentVariables:
+        - Name: VITE_API_URL
+          Value: !Ref ApiUrl
+      CustomRules:
+        - Source: '</^[^.]+$|\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json)$)([^.]+$)/>'
+          Target: /index.html
+          Status: '200'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Application
+          Value: AI-Content-Guard
+
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: main
+      Description: Main branch for production deployment
+      EnableAutoBuild: false
+      Stage: PRODUCTION
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Application
+          Value: AI-Content-Guard
+
+  # SSM Parameter for Amplify App ID (used by deploy-frontend.sh)
+  AmplifyAppIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/amplify/app-id'
+      Type: String
+      Value: !GetAtt AmplifyApp.AppId
+      Description: Amplify App ID for frontend deployment
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+        Owner: !Ref Owner
+        ManagedBy: CloudFormation
+        Application: AI-Content-Guard
+
+Outputs:
+  AmplifyAppId:
+    Description: Amplify App ID
+    Value: !GetAtt AmplifyApp.AppId
+    Export:
+      Name: !Sub '${ProjectName}-amplify-app-id'
+  AmplifyAppUrl:
+    Description: Amplify App default URL
+    Value: !Sub 'https://main.${AmplifyApp.DefaultDomain}'
+    Export:
+      Name: !Sub '${ProjectName}-amplify-url'
+  AmplifyBranchName:
+    Description: Amplify Branch name
+    Value: main

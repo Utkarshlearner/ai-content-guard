@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: API Gateway for AI Content Guard
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ai-content-guard
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+      - development
+  Owner:
+    Type: String
+    Default: utkarsh
+  LambdaFunctionArn:
+    Type: String
+    Description: ARN of the Lambda function
+  StageName:
+    Type: String
+    Default: prod
+
+Resources:
+  ContentGuardApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${ProjectName}-api'
+      Description: API for AI-powered text summarization with content safety
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Application
+          Value: AI-Content-Guard
+        - Key: Resource
+          Value: APIGateway
+
+  SummarizeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ContentGuardApi
+      ParentId: !GetAtt ContentGuardApi.RootResourceId
+      PathPart: summarize
+
+  SummarizeMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ContentGuardApi
+      ResourceId: !Ref SummarizeResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionArn}/invocations'
+
+  # CORS preflight
+  SummarizeOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ContentGuardApi
+      ResourceId: !Ref SummarizeResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - SummarizeMethod
+      - SummarizeOptionsMethod
+    Properties:
+      RestApiId: !Ref ContentGuardApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref ContentGuardApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: !Ref StageName
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          ThrottlingBurstLimit: 50
+          ThrottlingRateLimit: 100
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Application
+          Value: AI-Content-Guard
+
+  LambdaApiGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunctionArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ContentGuardApi}/*'
+
+Outputs:
+  ApiUrl:
+    Description: URL of the API endpoint
+    Value: !Sub 'https://${ContentGuardApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/summarize'
+    Export:
+      Name: !Sub '${ProjectName}-api-url'
+  ApiId:
+    Description: ID of the REST API
+    Value: !Ref ContentGuardApi
+    Export:
+      Name: !Sub '${ProjectName}-api-id'

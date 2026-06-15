@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: IAM Role for AI Content Guard Lambda function
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ai-content-guard
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+      - development
+  Owner:
+    Type: String
+    Default: utkarsh
+  DynamoDBTableArn:
+    Type: String
+    Description: ARN of the DynamoDB table
+  BedrockGuardrailArn:
+    Type: String
+    Description: ARN of the Bedrock Guardrail
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub '${ProjectName}-dynamodb-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !Ref DynamoDBTableArn
+        - PolicyName: !Sub '${ProjectName}-bedrock-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - 'arn:aws:bedrock:*:*:inference-profile/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:ApplyGuardrail
+                Resource: !Ref BedrockGuardrailArn
+        - PolicyName: !Sub '${ProjectName}-ssm-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/guardrail/*'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Application
+          Value: AI-Content-Guard
+
+Outputs:
+  LambdaExecutionRoleArn:
+    Description: ARN of the Lambda execution role
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub '${ProjectName}-lambda-role-arn'
