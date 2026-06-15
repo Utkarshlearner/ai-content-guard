@@ -166,6 +166,7 @@ function App() {
 
       <footer className="footer">
         <p>Built with AWS Lambda • Bedrock • Guardrails • DynamoDB • API Gateway</p>
+        <p><a href="https://www.linkedin.com/in/rastogiutkarsh/" target="_blank" rel="noopener noreferrer">Built by Utkarsh Rastogi</a></p>
       </footer>
     </div>
   )
