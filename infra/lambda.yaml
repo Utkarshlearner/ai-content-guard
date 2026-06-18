@@ -135,15 +135,25 @@ Resources:
                   guardrail_result = _apply_guardrail(text, "INPUT", guardrail)
                   logger.info(f"[{request_id}] Input guardrail result: action={guardrail_result['action']}, violations={len(guardrail_result['violations'])}")
 
+                  anonymized_types = []
                   if guardrail_result["action"] == "GUARDRAIL_INTERVENED":
-                      logger.warning(f"[{request_id}] INPUT BLOCKED | violations={json.dumps(guardrail_result['violations'])}")
-                      _save_record(request_id, created_at, text, None, "BLOCKED_INPUT", guardrail_result)
-                      return _response(422, {
-                          "status": "blocked",
-                          "reason": "Input content violated safety policy.",
-                          "message": guardrail_result.get("output", "Content blocked by safety guardrails."),
-                          "violations": guardrail_result.get("violations", []),
-                      })
+                      # Check if all violations are ANONYMIZED (not BLOCKED)
+                      all_anonymized = all(v.get("action") == "ANONYMIZED" for v in guardrail_result["violations"])
+                      if all_anonymized and guardrail_result.get("output"):
+                          # PII was anonymized — use the cleaned text for summarization
+                          logger.info(f"[{request_id}] Input PII anonymized, continuing with cleaned text")
+                          anonymized_types = list(set(v["category"] for v in guardrail_result["violations"]))
+                          text = guardrail_result["output"]
+                      else:
+                          # Content was hard-blocked
+                          logger.warning(f"[{request_id}] INPUT BLOCKED | violations={json.dumps(guardrail_result['violations'])}")
+                          _save_record(request_id, created_at, text, None, "BLOCKED_INPUT", guardrail_result)
+                          return _response(422, {
+                              "status": "blocked",
+                              "reason": "Input content violated safety policy.",
+                              "message": guardrail_result.get("output", "Content blocked by safety guardrails."),
+                              "violations": guardrail_result.get("violations", []),
+                          })
 
                   # Step 2: Invoke Bedrock model for summarization
                   logger.info(f"[{request_id}] Step 2: Invoking model {MODEL_ID}")
@@ -156,24 +166,36 @@ Resources:
                   logger.info(f"[{request_id}] Output guardrail result: action={output_guardrail['action']}")
 
                   if output_guardrail["action"] == "GUARDRAIL_INTERVENED":
-                      logger.warning(f"[{request_id}] OUTPUT BLOCKED | violations={json.dumps(output_guardrail['violations'])}")
-                      _save_record(request_id, created_at, text, summary, "BLOCKED_OUTPUT", output_guardrail)
-                      return _response(422, {
-                          "status": "blocked",
-                          "reason": "Generated summary violated safety policy.",
-                          "message": output_guardrail.get("output", "Content blocked by safety guardrails."),
-                          "violations": output_guardrail.get("violations", []),
-                      })
+                      all_anonymized = all(v.get("action") == "ANONYMIZED" for v in output_guardrail["violations"])
+                      if all_anonymized and output_guardrail.get("output"):
+                          # PII in output was anonymized — return the cleaned summary
+                          logger.info(f"[{request_id}] Output PII anonymized, returning cleaned summary")
+                          summary = output_guardrail["output"]
+                          output_anon = list(set(v["category"] for v in output_guardrail["violations"]))
+                          anonymized_types = list(set(anonymized_types + output_anon))
+                      else:
+                          logger.warning(f"[{request_id}] OUTPUT BLOCKED | violations={json.dumps(output_guardrail['violations'])}")
+                          _save_record(request_id, created_at, text, summary, "BLOCKED_OUTPUT", output_guardrail)
+                          return _response(422, {
+                              "status": "blocked",
+                              "reason": "Generated summary violated safety policy.",
+                              "message": output_guardrail.get("output", "Content blocked by safety guardrails."),
+                              "violations": output_guardrail.get("violations", []),
+                          })
 
                   # Step 4: Save successful result
                   logger.info(f"[{request_id}] Step 4: Saving to DynamoDB")
                   _save_record(request_id, created_at, text, summary, "SUCCESS", None)
                   logger.info(f"[{request_id}] ✓ SUCCESS | summary_length={len(summary)}")
 
-                  return _response(200, {
+                  response_body = {
                       "status": "success",
                       "summary": summary,
-                  })
+                  }
+                  if anonymized_types:
+                      response_body["anonymized"] = anonymized_types
+
+                  return _response(200, response_body)
 
               except ClientError as e:
                   error_code = e.response["Error"]["Code"]

@@ -176,13 +176,13 @@ The guardrail applies to both INPUT (user text) and OUTPUT (generated summary):
 | PROMPT_ATTACK | HIGH | NONE |
 
 **PII Handling:**
-| PII Type | Action |
-|----------|--------|
-| EMAIL | ANONYMIZE |
-| PHONE | ANONYMIZE |
-| NAME | ANONYMIZE |
-| US_SOCIAL_SECURITY_NUMBER | BLOCK |
-| CREDIT_DEBIT_CARD_NUMBER | BLOCK |
+| PII Type | Action | Behavior |
+|----------|--------|----------|
+| EMAIL | ANONYMIZE | Masked as `{EMAIL}`, summary still generated |
+| PHONE | ANONYMIZE | Masked as `{PHONE}`, summary still generated |
+| NAME | ANONYMIZE | Masked as `{NAME}`, summary still generated |
+| US_SOCIAL_SECURITY_NUMBER | BLOCK | Request rejected entirely (422) |
+| CREDIT_DEBIT_CARD_NUMBER | BLOCK | Request rejected entirely (422) |
 
 Reference: [Bedrock Guardrails Sensitive Information Filters](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html)
 

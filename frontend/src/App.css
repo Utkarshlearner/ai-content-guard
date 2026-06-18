@@ -213,6 +213,16 @@
   border-radius: 8px;
 }
 
+.anonymized-note {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  color: #92400e;
+  background: #fffbeb;
+  border-radius: 8px;
+  border-left: 3px solid #f59e0b;
+}
+
 .blocked-reason {
   color: #dc2626;
   font-weight: 500;
@@ -296,6 +306,12 @@
 
   .blocked-reason {
     color: #f87171;
+  }
+
+  .anonymized-note {
+    background: rgba(245, 158, 11, 0.1);
+    color: #fde68a;
+    border-left-color: #f59e0b;
   }
 }
 

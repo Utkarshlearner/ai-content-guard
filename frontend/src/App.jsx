@@ -136,6 +136,11 @@ function App() {
                 <div className="summary-section">
                   <h3>Summary</h3>
                   <p className="summary-text">{result.summary}</p>
+                  {result.anonymized && result.anonymized.length > 0 && (
+                    <p className="anonymized-note">
+                      🔒 Personal information like {result.anonymized.map(t => t.replace(/_/g, ' ').toLowerCase()).join(', ')} was hidden to protect privacy.
+                    </p>
+                  )}
                 </div>
               )}
 

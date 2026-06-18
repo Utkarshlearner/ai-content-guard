@@ -151,6 +151,15 @@ All stacks and resources are tagged with:
 { "status": "success", "summary": "Concise 2-3 sentence summary." }
 ```
 
+**Success with personal info hidden (200):**
+```json
+{
+  "status": "success",
+  "summary": "{NAME} wants to discuss the project deadline by Friday 5 PM. Contact via {EMAIL} or {PHONE}.",
+  "anonymized": ["NAME", "EMAIL", "PHONE"]
+}
+```
+
 **Blocked (422):**
 ```json
 {
@@ -164,8 +173,8 @@ All stacks and resources are tagged with:
 ## Content Safety
 
 - **Blocks:** sexual, violence, hate, insults, misconduct, prompt attacks
-- **Anonymizes:** email, phone, name
-- **Hard-blocks:** SSN, credit card numbers
+- **Hides personal info:** email, phone, name (replaced with `{EMAIL}`, `{PHONE}`, `{NAME}` — summary still generated, UI shows "Personal information was hidden to protect privacy")
+- **Hard-blocks:** SSN, credit card numbers (request rejected entirely)
 
 ## Cleanup
 

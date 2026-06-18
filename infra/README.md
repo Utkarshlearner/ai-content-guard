@@ -60,8 +60,12 @@ The Lambda code is embedded inline in `lambda.yaml` using `Code.ZipFile`. No S3 
 1. Validate input (max 10,000 chars)
 2. Load guardrail config from SSM (cached per cold start)
 3. Apply Bedrock Guardrail on input
+   - If all violations are ANONYMIZE → use cleaned text, continue
+   - If any violation is BLOCK → reject request (422)
 4. Invoke Nova Lite for summarization
 5. Apply Bedrock Guardrail on output
+   - If all violations are ANONYMIZE → return cleaned summary
+   - If any violation is BLOCK → reject request (422)
 6. Log to DynamoDB (30-day TTL)
 
 ## IAM Permissions (Lambda Role)
@@ -79,8 +83,8 @@ The Lambda code is embedded inline in `lambda.yaml` using `Code.ZipFile`. No S3 
 - Sexual, Violence, Hate, Insults, Misconduct, Prompt Attack
 
 **PII Handling:**
-- Anonymize: Email, Phone, Name
-- Block: US SSN, Credit/Debit Card Number
+- Anonymize: Email, Phone, Name (masked as `{EMAIL}`, `{PHONE}`, `{NAME}` — request continues)
+- Block: US SSN, Credit/Debit Card Number (request fully rejected)
 
 ## Deploy
 
