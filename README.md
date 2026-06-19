@@ -100,10 +100,13 @@ Builds the React app and uploads to Amplify. Outputs the live URL.
 ### Redeploy Individual Components
 
 ```bash
+./deploy.sh guardrail   # After changing guardrail config (auto-redeploys Lambda)
 ./deploy.sh lambda      # After changing Lambda code
 ./deploy.sh api         # After changing API Gateway config
 ./deploy-frontend.sh    # After changing frontend code
 ```
+
+> **Note:** `./deploy.sh guardrail` automatically updates SSM parameters AND redeploys the Lambda to ensure it picks up the new guardrail version immediately.
 
 ## Stacks Created
 
@@ -172,9 +175,25 @@ All stacks and resources are tagged with:
 
 ## Content Safety
 
-- **Blocks:** sexual, violence, hate, insults, misconduct, prompt attacks
-- **Hides personal info:** email, phone, name (replaced with `{EMAIL}`, `{PHONE}`, `{NAME}` — summary still generated, UI shows "Personal information was hidden to protect privacy")
-- **Hard-blocks:** SSN, credit card numbers (request rejected entirely)
+- **Content Filters (HIGH strength):** sexual, violence, hate, insults, misconduct, prompt attacks
+- **Topic Policies (DENY):** weapons/bomb instructions, drug manufacturing, hacking instructions, self-harm/suicide
+- **Word Policy:** explicit blocked words + AWS managed profanity list (catches spacing tricks like "s e x", mixed case, leet-speak)
+- **PII Anonymized (summary still generated):** name, email, phone, address, age, username, URL, IP address, MAC address, driver ID, license plate, vehicle ID, social media handles, dates of birth, zip codes, room/apartment numbers
+- **PII Hard-Blocked (request rejected):** credit card numbers, CVV, expiry, bank accounts, routing numbers, IBAN, SWIFT, PIN, SSN, passport, tax ID, UK NHS/NI/UTR, Canadian health/SIN, passwords, AWS keys, Aadhaar, PAN card
+
+### How PII Anonymization Works
+
+Input with personal info is **not rejected** — instead, the PII is masked and the summary is still generated:
+
+```json
+{
+  "status": "success",
+  "summary": "{NAME}, aged {AGE}, works at Google in {ADDRESS}. He enjoys watching science fiction movies.",
+  "anonymized": ["NAME", "AGE", "ADDRESS"]
+}
+```
+
+Only financial data, government IDs, and credentials trigger a hard block (422 response).
 
 ## Cleanup
 

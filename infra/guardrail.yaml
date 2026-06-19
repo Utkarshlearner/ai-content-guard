@@ -46,16 +46,187 @@ Resources:
             OutputStrength: NONE
       SensitiveInformationPolicyConfig:
         PiiEntitiesConfig:
+          # ── ANONYMIZE: Strip PII but allow text through ──
+          # Personal identifiers (safe to anonymize, user still gets their summary)
+          - Type: NAME
+            Action: ANONYMIZE
           - Type: EMAIL
             Action: ANONYMIZE
           - Type: PHONE
             Action: ANONYMIZE
-          - Type: NAME
+          - Type: ADDRESS
             Action: ANONYMIZE
-          - Type: US_SOCIAL_SECURITY_NUMBER
-            Action: BLOCK
+          - Type: AGE
+            Action: ANONYMIZE
+          - Type: USERNAME
+            Action: ANONYMIZE
+          - Type: URL
+            Action: ANONYMIZE
+          - Type: IP_ADDRESS
+            Action: ANONYMIZE
+          - Type: MAC_ADDRESS
+            Action: ANONYMIZE
+          - Type: DRIVER_ID
+            Action: ANONYMIZE
+          - Type: LICENSE_PLATE
+            Action: ANONYMIZE
+          - Type: VEHICLE_IDENTIFICATION_NUMBER
+            Action: ANONYMIZE
+          # ── BLOCK: Hard reject — too dangerous to process ──
+          # Financial (can enable fraud)
           - Type: CREDIT_DEBIT_CARD_NUMBER
             Action: BLOCK
+          - Type: CREDIT_DEBIT_CARD_CVV
+            Action: BLOCK
+          - Type: CREDIT_DEBIT_CARD_EXPIRY
+            Action: BLOCK
+          - Type: US_BANK_ACCOUNT_NUMBER
+            Action: BLOCK
+          - Type: US_BANK_ROUTING_NUMBER
+            Action: BLOCK
+          - Type: INTERNATIONAL_BANK_ACCOUNT_NUMBER
+            Action: BLOCK
+          - Type: SWIFT_CODE
+            Action: BLOCK
+          - Type: PIN
+            Action: BLOCK
+          # Government IDs (identity theft risk)
+          - Type: US_SOCIAL_SECURITY_NUMBER
+            Action: BLOCK
+          - Type: US_PASSPORT_NUMBER
+            Action: BLOCK
+          - Type: US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER
+            Action: BLOCK
+          - Type: UK_NATIONAL_HEALTH_SERVICE_NUMBER
+            Action: BLOCK
+          - Type: UK_NATIONAL_INSURANCE_NUMBER
+            Action: BLOCK
+          - Type: UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER
+            Action: BLOCK
+          - Type: CA_HEALTH_NUMBER
+            Action: BLOCK
+          - Type: CA_SOCIAL_INSURANCE_NUMBER
+            Action: BLOCK
+          # Credentials (security risk)
+          - Type: PASSWORD
+            Action: BLOCK
+          - Type: AWS_ACCESS_KEY
+            Action: BLOCK
+          - Type: AWS_SECRET_KEY
+            Action: BLOCK
+        RegexesConfig:
+          # ── Date of Birth patterns (all formats) ──
+          - Name: DateDMY
+            Description: DD Mon YYYY or DD/MM/YYYY or DD-MM-YYYY
+            Pattern: '\b\d{1,2}(st|nd|rd|th)?[\s/\-\.]+(of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december|\d{1,2})[\s/\-\.,]+\d{2,4}\b'
+            Action: ANONYMIZE
+          - Name: DateMDY
+            Description: January 11, 1993 or Jan 11 1993 or March 5th, 1990
+            Pattern: '\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)[\s\.\-]+\d{1,2}(st|nd|rd|th)?[\s,\-]+\d{2,4}\b'
+            Action: ANONYMIZE
+          - Name: DateISO
+            Description: YYYY-MM-DD or YYYY/MM/DD
+            Pattern: '\b(19|20)\d{2}[\-/](0[1-9]|1[0-2])[\-/](0[1-9]|[12]\d|3[01])\b'
+            Action: ANONYMIZE
+          - Name: BornYear
+            Description: born in 1993 or born on 1993 or date of birth 1993
+            Pattern: '\b(born|birth|dob)[\s\w]{0,15}(19|20)\d{2}\b'
+            Action: ANONYMIZE
+          # ── Age patterns (model might rephrase) ──
+          - Name: AgeYearsOld
+            Description: 32 years old, 32-year-old, aged 32
+            Pattern: '\b(aged?\s*\d{1,3}|\d{1,3}[\s\-]?year[\s\-]?old)\b'
+            Action: ANONYMIZE
+          # ── Zip/Postal codes ──
+          - Name: USZipCode
+            Description: US zip codes 5 or 9 digit
+            Pattern: '\b\d{5}(-\d{4})?\b'
+            Action: ANONYMIZE
+          - Name: IndianPinCode
+            Description: Indian PIN codes (6 digits starting with 1-9)
+            Pattern: '\b[1-9]\d{5}\b'
+            Action: ANONYMIZE
+          # ── Phone number patterns ──
+          - Name: IndianPhone
+            Description: Indian phone numbers +91 or 0-prefixed
+            Pattern: '\b(\+91[\s\-]?\d{10}|0\d{10})\b'
+            Action: ANONYMIZE
+          - Name: InternationalPhone
+            Description: International phone with country code
+            Pattern: '\b\+\d{1,3}[\s\-]?\d{6,14}\b'
+            Action: ANONYMIZE
+          # ── Social media and identifiers ──
+          - Name: SocialMediaHandle
+            Description: Twitter/Instagram handles like @username
+            Pattern: '(@[a-zA-Z0-9_]{2,30})\b'
+            Action: ANONYMIZE
+          # ── Government IDs (India) ──
+          - Name: AadhaarNumber
+            Description: Indian Aadhaar numbers (12 digits with optional spaces)
+            Pattern: '\b\d{4}\s?\d{4}\s?\d{4}\b'
+            Action: BLOCK
+          - Name: PANNumber
+            Description: Indian PAN card numbers ABCDE1234F
+            Pattern: '\b[A-Z]{5}\d{4}[A-Z]\b'
+            Action: BLOCK
+          # ── Room/apartment/house numbers with location ──
+          - Name: RoomAptNumber
+            Description: Room no, Apt, Flat, House number patterns
+            Pattern: '\b(room|apt|apartment|flat|house|unit|suite|floor)[\s\.#\-:]*\w{1,10}\b'
+            Action: ANONYMIZE
+      TopicPolicyConfig:
+        TopicsConfig:
+          - Name: WeaponsInstructions
+            Definition: Instructions or guidance on how to build, assemble, or use weapons, explosives, or harmful devices
+            Examples:
+              - How to make a bomb
+              - Steps to build a gun at home
+              - How to create explosives
+            Type: DENY
+          - Name: DrugManufacturing
+            Definition: Instructions on how to manufacture, synthesize, or produce illegal drugs or controlled substances
+            Examples:
+              - How to make methamphetamine
+              - Steps to grow marijuana
+              - How to synthesize LSD
+            Type: DENY
+          - Name: HackingInstructions
+            Definition: Instructions on how to hack systems, steal data, bypass security, or conduct cyberattacks
+            Examples:
+              - How to hack a WiFi password
+              - Steps to break into a computer
+              - How to steal someones account
+            Type: DENY
+          - Name: SelfHarm
+            Definition: Content that promotes, encourages, or provides instructions for self-harm or suicide
+            Examples:
+              - How to hurt myself
+              - Best way to end my life
+              - Methods of suicide
+            Type: DENY
+      WordPolicyConfig:
+        WordsConfig:
+          - Text: sex
+          - Text: porn
+          - Text: pornography
+          - Text: nude
+          - Text: naked
+          - Text: xxx
+          - Text: fuck
+          - Text: shit
+          - Text: dick
+          - Text: pussy
+          - Text: ass
+          - Text: bitch
+          - Text: rape
+          - Text: molest
+          - Text: pedophile
+          - Text: kill yourself
+          - Text: suicide method
+          - Text: how to make bomb
+          - Text: drug dealer
+        ManagedWordListsConfig:
+          - Type: PROFANITY
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -72,7 +243,7 @@ Resources:
     Type: AWS::Bedrock::GuardrailVersion
     Properties:
       GuardrailIdentifier: !GetAtt ContentGuardrail.GuardrailId
-      Description: Initial version
+      Description: v4 - Comprehensive regex for all date formats, age variants, zip codes, phone intl, social handles, room numbers, topic policies
 
   # SSM Parameters for Guardrail ID and Version
   GuardrailIdParameter:

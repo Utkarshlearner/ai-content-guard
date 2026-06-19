@@ -175,14 +175,75 @@ The guardrail applies to both INPUT (user text) and OUTPUT (generated summary):
 | MISCONDUCT | HIGH | HIGH |
 | PROMPT_ATTACK | HIGH | NONE |
 
-**PII Handling:**
-| PII Type | Action | Behavior |
-|----------|--------|----------|
-| EMAIL | ANONYMIZE | Masked as `{EMAIL}`, summary still generated |
-| PHONE | ANONYMIZE | Masked as `{PHONE}`, summary still generated |
-| NAME | ANONYMIZE | Masked as `{NAME}`, summary still generated |
-| US_SOCIAL_SECURITY_NUMBER | BLOCK | Request rejected entirely (422) |
-| CREDIT_DEBIT_CARD_NUMBER | BLOCK | Request rejected entirely (422) |
+**Topic Policies (DENY — request rejected if detected):**
+| Topic | Description |
+|-------|-------------|
+| WeaponsInstructions | How to build weapons, explosives, harmful devices |
+| DrugManufacturing | How to synthesize illegal drugs or controlled substances |
+| HackingInstructions | How to hack systems, steal data, bypass security |
+| SelfHarm | Content promoting self-harm or suicide |
+
+**Word Policy:**
+| Type | Purpose |
+|------|---------|
+| Custom word list | Explicit blocked words (sex, porn, nude, etc.) |
+| AWS Managed PROFANITY | Catches thousands of variations including spacing ("s e x"), mixed case ("SeX"), leet-speak ("s3x"), misspellings |
+
+**PII Handling — ANONYMIZE (text still processed, PII masked):**
+| PII Type | Action | Example Output |
+|----------|--------|----------------|
+| NAME | ANONYMIZE | `{NAME}` |
+| EMAIL | ANONYMIZE | `{EMAIL}` |
+| PHONE | ANONYMIZE | `{PHONE}` |
+| ADDRESS | ANONYMIZE | `{ADDRESS}` |
+| AGE | ANONYMIZE | `{AGE}` |
+| USERNAME | ANONYMIZE | `{USERNAME}` |
+| URL | ANONYMIZE | `{URL}` |
+| IP_ADDRESS | ANONYMIZE | `{IP_ADDRESS}` |
+| MAC_ADDRESS | ANONYMIZE | `{MAC_ADDRESS}` |
+| DRIVER_ID | ANONYMIZE | `{DRIVER_ID}` |
+| LICENSE_PLATE | ANONYMIZE | `{LICENSE_PLATE}` |
+| VEHICLE_IDENTIFICATION_NUMBER | ANONYMIZE | `{VEHICLE_IDENTIFICATION_NUMBER}` |
+
+**PII Handling — BLOCK (entire request rejected with 422):**
+| PII Type | Action | Reason |
+|----------|--------|--------|
+| CREDIT_DEBIT_CARD_NUMBER | BLOCK | Financial fraud risk |
+| CREDIT_DEBIT_CARD_CVV | BLOCK | Financial fraud risk |
+| CREDIT_DEBIT_CARD_EXPIRY | BLOCK | Financial fraud risk |
+| US_BANK_ACCOUNT_NUMBER | BLOCK | Financial fraud risk |
+| US_BANK_ROUTING_NUMBER | BLOCK | Financial fraud risk |
+| INTERNATIONAL_BANK_ACCOUNT_NUMBER | BLOCK | Financial fraud risk |
+| SWIFT_CODE | BLOCK | Financial fraud risk |
+| PIN | BLOCK | Financial fraud risk |
+| US_SOCIAL_SECURITY_NUMBER | BLOCK | Identity theft risk |
+| US_PASSPORT_NUMBER | BLOCK | Identity theft risk |
+| US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER | BLOCK | Identity theft risk |
+| UK_NATIONAL_HEALTH_SERVICE_NUMBER | BLOCK | Identity theft risk |
+| UK_NATIONAL_INSURANCE_NUMBER | BLOCK | Identity theft risk |
+| UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER | BLOCK | Identity theft risk |
+| CA_HEALTH_NUMBER | BLOCK | Identity theft risk |
+| CA_SOCIAL_INSURANCE_NUMBER | BLOCK | Identity theft risk |
+| PASSWORD | BLOCK | Security risk |
+| AWS_ACCESS_KEY | BLOCK | Security risk |
+| AWS_SECRET_KEY | BLOCK | Security risk |
+
+**Regex Patterns (custom detection beyond built-in PII):**
+| Pattern Name | Detects | Action |
+|--------------|---------|--------|
+| DateDMY | "11 Jan 1993", "11/01/1993" | ANONYMIZE |
+| DateMDY | "January 11, 1993", "Jan 11 1993" | ANONYMIZE |
+| DateISO | "1993-01-11" | ANONYMIZE |
+| BornYear | "born in 1993", "date of birth 1993" | ANONYMIZE |
+| AgeYearsOld | "32 years old", "aged 32", "32-year-old" | ANONYMIZE |
+| USZipCode | "10001", "10001-1234" | ANONYMIZE |
+| IndianPinCode | 6-digit Indian PIN codes | ANONYMIZE |
+| IndianPhone | "+91 9876543210" | ANONYMIZE |
+| InternationalPhone | "+44 7911123456" | ANONYMIZE |
+| SocialMediaHandle | "@username" | ANONYMIZE |
+| AadhaarNumber | "1234 5678 9012" (12-digit) | BLOCK |
+| PANNumber | "ABCDE1234F" | BLOCK |
+| RoomAptNumber | "room no 23", "apt 4B", "suite 500" | ANONYMIZE |
 
 Reference: [Bedrock Guardrails Sensitive Information Filters](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html)
 
@@ -279,9 +340,22 @@ Structured logs with request ID correlation:
 # Deploy all infrastructure
 ./deploy.sh all
 
+# Deploy only guardrail (auto-updates SSM + redeploys Lambda)
+./deploy.sh guardrail
+
 # Deploy frontend to Amplify
 ./deploy-frontend.sh
 
 # Destroy everything
 ./destroy.sh
 ```
+
+### Guardrail Deployment Flow
+
+When running `./deploy.sh guardrail`, the script performs:
+
+1. **Deploy CloudFormation stack** — Creates/updates the guardrail resource and publishes a new version
+2. **Update SSM parameters** — Writes the new guardrail ID and version to SSM Parameter Store
+3. **Redeploy Lambda** — Redeploys the Lambda stack and forces a cold start (via `GUARDRAIL_CACHE_BUST` env var) so it reads the new version from SSM
+
+> **Important:** The `GuardrailVersion` resource `Description` must be changed each time you modify the guardrail config, otherwise CloudFormation won't create a new published version.

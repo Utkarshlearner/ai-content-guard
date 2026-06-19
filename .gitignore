@@ -27,3 +27,6 @@ packaged.yaml
 .env
 .env.local
 .env.production
+
+# Personal notes
+speaker-notes.md
