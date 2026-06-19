@@ -105,12 +105,20 @@ deploy_guardrail() {
     --region "${AWS_REGION}" \
     --no-fail-on-empty-changeset
 
-  # Fetch the latest guardrail version from the deployed stack
+  # Fetch guardrail ID from the deployed stack
   local GUARDRAIL_ID=$(get_output "${PROJECT_NAME}-guardrail" GuardrailId)
-  local GUARDRAIL_VERSION=$(get_output "${PROJECT_NAME}-guardrail" GuardrailVersion)
 
-  # Override SSM parameter with the latest guardrail version (in case of drift)
-  echo "  → Updating SSM parameter with latest guardrail version..."
+  # Create a new guardrail version via CLI (preserves old versions)
+  echo "  → Creating new guardrail version via CLI..."
+  local GUARDRAIL_VERSION=$(aws bedrock create-guardrail-version \
+    --guardrail-identifier "${GUARDRAIL_ID}" \
+    --description "Deployed at $(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
+    --region "${AWS_REGION}" \
+    --query 'version' \
+    --output text)
+
+  # Update SSM parameters with the latest version
+  echo "  → Updating SSM parameter with guardrail version ${GUARDRAIL_VERSION}..."
   aws ssm put-parameter \
     --name "/${PROJECT_NAME}/guardrail/version" \
     --value "${GUARDRAIL_VERSION}" \
@@ -125,32 +133,46 @@ deploy_guardrail() {
     --overwrite \
     --region "${AWS_REGION}" > /dev/null
 
-  # Force Lambda to pick up the new guardrail version by redeploying Lambda stack
-  echo "  → Redeploying Lambda to pick up guardrail v${GUARDRAIL_VERSION}..."
-  local LAMBDA_STACK="${PROJECT_NAME}-lambda"
-  if aws cloudformation describe-stacks --stack-name "${LAMBDA_STACK}" --region "${AWS_REGION}" > /dev/null 2>&1; then
-    local ROLE_ARN=$(get_output "${PROJECT_NAME}-iam-role" LambdaExecutionRoleArn)
+  # Forcefully redeploy Lambda to pick up the new guardrail version
+  echo "  → Force redeploying Lambda to pick up guardrail v${GUARDRAIL_VERSION}..."
+  local LAMBDA_NAME="${PROJECT_NAME}-summarizer"
+  if aws lambda get-function --function-name "${LAMBDA_NAME}" --region "${AWS_REGION}" > /dev/null 2>&1; then
     local TABLE_NAME=$(get_output "${PROJECT_NAME}-dynamodb" SummaryTableName)
+    local ROLE_ARN=$(get_output "${PROJECT_NAME}-iam-role" LambdaExecutionRoleArn)
+
+    # Deploy Lambda stack (picks up any code changes in lambda.yaml)
+    echo "  → Deploying Lambda stack..."
     aws cloudformation deploy \
       --template-file infra/lambda.yaml \
-      --stack-name "${LAMBDA_STACK}" \
+      --stack-name "${PROJECT_NAME}-lambda" \
       --parameter-overrides \
         ProjectName="${PROJECT_NAME}" Environment="${ENVIRONMENT}" Owner="${OWNER}" \
         LambdaRoleArn="${ROLE_ARN}" DynamoDBTableName="${TABLE_NAME}" \
       --tags "${TAGS[@]}" \
       --region "${AWS_REGION}" \
       --no-fail-on-empty-changeset
-    # Force cold start by updating env var (since code hasn't changed, CFN won't replace the function)
+
+    # Update env var with new cache bust timestamp — forces Lambda to discard cached SSM values
+    echo "  → Forcing Lambda cold start..."
     aws lambda update-function-configuration \
-      --function-name "${PROJECT_NAME}-summarizer" \
+      --function-name "${LAMBDA_NAME}" \
       --environment "Variables={TABLE_NAME=${TABLE_NAME},GUARDRAIL_ID_SSM_PATH=/${PROJECT_NAME}/guardrail/id,GUARDRAIL_VERSION_SSM_PATH=/${PROJECT_NAME}/guardrail/version,MODEL_ID=amazon.nova-lite-v1:0,GUARDRAIL_CACHE_BUST=$(date +%s)}" \
       --region "${AWS_REGION}" > /dev/null 2>&1
+
+    # Wait for config update to finish
     aws lambda wait function-updated \
-      --function-name "${PROJECT_NAME}-summarizer" \
+      --function-name "${LAMBDA_NAME}" \
       --region "${AWS_REGION}" 2>/dev/null
-    echo "  ✓ Lambda redeployed — now using guardrail v${GUARDRAIL_VERSION}"
+
+    # Publish a new version to guarantee all existing warm instances are replaced
+    aws lambda publish-version \
+      --function-name "${LAMBDA_NAME}" \
+      --description "Guardrail v${GUARDRAIL_VERSION}" \
+      --region "${AWS_REGION}" > /dev/null 2>&1
+
+    echo "  ✓ Lambda force redeployed — now using guardrail v${GUARDRAIL_VERSION}"
   else
-    echo "  ⚠ Lambda stack not found — deploy it first with: ./deploy.sh lambda"
+    echo "  ⚠ Lambda not found — deploy it first with: ./deploy.sh lambda"
   fi
 
   echo "  ✓ Guardrail: ${GUARDRAIL_ID} (v${GUARDRAIL_VERSION})"

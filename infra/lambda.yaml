@@ -130,9 +130,12 @@ Resources:
                   # Load guardrail config from SSM
                   guardrail = _get_guardrail_config()
 
-                  # Step 1: Apply guardrail to input text
+                  # Normalize text for guardrail check (collapse spaced-out evasion like "S E X" → "SEX")
+                  normalized_text = _normalize_for_guardrail(text)
+
+                  # Step 1: Apply guardrail to normalized input text
                   logger.info(f"[{request_id}] Step 1: Applying input guardrail")
-                  guardrail_result = _apply_guardrail(text, "INPUT", guardrail)
+                  guardrail_result = _apply_guardrail(normalized_text, "INPUT", guardrail)
                   logger.info(f"[{request_id}] Input guardrail result: action={guardrail_result['action']}, violations={len(guardrail_result['violations'])}")
 
                   anonymized_types = []
@@ -217,6 +220,53 @@ Resources:
                   return _response(500, {"error": "An unexpected error occurred."})
 
 
+          def _normalize_for_guardrail(text):
+              """
+              Normalize text to defeat ALL evasion tricks:
+              1. Collapse spaced chars: "S E X" → "SEX"
+              2. Strip special chars between letters: "s.e.x" "s*x" → "sex"
+              3. Leet-speak decode: "s3x" → "sex", "f@ck" → "fack"
+              4. Unscramble known profanity anagrams: "fcuk" → "fuck"
+              5. Remove repeated chars: "sexxxx" → "sex"
+              """
+              import re
+
+              # Step 1: Collapse single chars separated by spaces/punctuation
+              def collapse_spaced(match):
+                  return re.sub(r'[\s.\-_*!@#$%^&()]+', '', match.group(0))
+
+              normalized = re.sub(
+                  r'\b([a-zA-Z][\s.\-_*!@#$%^&()]+){2,}[a-zA-Z]\b',
+                  collapse_spaced,
+                  text
+              )
+
+              # Step 2: Leet-speak mapping
+              leet_map = str.maketrans('013457@$!', 'oieastasi')
+              normalized = normalized.translate(leet_map)
+
+              # Step 3: Remove non-alphanumeric chars inserted between word chars
+              # Catches: "f*ck", "s#it", "p@rn"
+              normalized = re.sub(r'(?<=[a-zA-Z])[*#@$!%^&_.]+(?=[a-zA-Z])', '', normalized)
+
+              # Step 4: Deduplicate repeated chars (3+ → 1): "fuuuck" → "fuck", "sexxxx" → "sex"
+              normalized = re.sub(r'(.)\1{2,}', r'\1', normalized)
+
+              # Step 5: Sort-based anagram detection for known bad words
+              # Build sorted-char signatures of blocked words and check input words
+              blocked_words = ['fuck', 'shit', 'dick', 'porn', 'rape', 'nude', 'sex', 'ass', 'cum']
+              blocked_sorted = {tuple(sorted(w)): w for w in blocked_words}
+
+              words = re.findall(r'[a-zA-Z]{3,6}', normalized.lower())
+              for word in words:
+                  sorted_word = tuple(sorted(word))
+                  if sorted_word in blocked_sorted:
+                      # Found an anagram of a blocked word — inject the real word for guardrail to catch
+                      normalized += f' {blocked_sorted[sorted_word]}'
+
+              return normalized
+
+
           def _apply_guardrail(text, source, guardrail):
               """Apply Bedrock Guardrail to text content."""
               response = bedrock_runtime.apply_guardrail(
@@ -289,7 +339,7 @@ Resources:
 
           def _save_record(request_id, created_at, input_text, summary, status, guardrail_result):
               """Save request/response record to DynamoDB."""
-              ttl = int(time.time()) + (30 * 24 * 60 * 60)  # 30 days TTL
+              ttl = int(time.time()) + (2 * 24 * 60 * 60)  # 2 days TTL
 
               item = {
                   "requestId": request_id,

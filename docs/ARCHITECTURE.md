@@ -149,13 +149,13 @@ Response format from Lambda:
 | `summary` | String | Generated summary (if successful) |
 | `status` | String | SUCCESS / BLOCKED_INPUT / BLOCKED_OUTPUT |
 | `guardrailAction` | String | GUARDRAIL_INTERVENED / NONE |
-| `ttl` | Number | Auto-delete after 30 days |
+| `ttl` | Number | Auto-delete after 2 days |
 
 Features enabled:
 - **PAY_PER_REQUEST** — No capacity planning needed
 - **SSE** — Server-side encryption at rest
 - **PITR** — Point-in-time recovery for data protection
-- **TTL** — Automatic cleanup of old records
+- **TTL** — Automatic cleanup of old records (2 days)
 
 Reference: [DynamoDB Point-in-time Recovery](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html)
 
@@ -173,7 +173,7 @@ The guardrail applies to both INPUT (user text) and OUTPUT (generated summary):
 | HATE | HIGH | HIGH |
 | INSULTS | HIGH | HIGH |
 | MISCONDUCT | HIGH | HIGH |
-| PROMPT_ATTACK | HIGH | NONE |
+| PROMPT_ATTACK | MEDIUM | NONE |
 
 **Topic Policies (DENY — request rejected if detected):**
 | Topic | Description |
@@ -288,7 +288,7 @@ The Lambda execution role has only the permissions it needs:
 ### DynamoDB
 - Server-side encryption (SSE) enabled
 - Input text truncated to 1000 chars before storage
-- 30-day TTL auto-deletes records
+- 2-day TTL auto-deletes records
 
 ## Tagging Strategy
 
@@ -354,8 +354,34 @@ Structured logs with request ID correlation:
 
 When running `./deploy.sh guardrail`, the script performs:
 
-1. **Deploy CloudFormation stack** — Creates/updates the guardrail resource and publishes a new version
-2. **Update SSM parameters** — Writes the new guardrail ID and version to SSM Parameter Store
-3. **Redeploy Lambda** — Redeploys the Lambda stack and forces a cold start (via `GUARDRAIL_CACHE_BUST` env var) so it reads the new version from SSM
+1. **Deploy CloudFormation stack** — Creates/updates the guardrail resource config (DRAFT)
+2. **Create new version via CLI** — Runs `aws bedrock create-guardrail-version` which preserves old versions (unlike CloudFormation which deletes them)
+3. **Update SSM parameters** — Writes the new guardrail ID and version to SSM Parameter Store
+4. **Force redeploy Lambda** (only if Lambda exists):
+   - Deploys Lambda CloudFormation stack (picks up code changes)
+   - Updates env var `GUARDRAIL_CACHE_BUST` with new timestamp (forces cold start)
+   - Publishes new Lambda version (guarantees fresh execution environment)
 
-> **Important:** The `GuardrailVersion` resource `Description` must be changed each time you modify the guardrail config, otherwise CloudFormation won't create a new published version.
+> **Note:** On first-time deployment (`./deploy.sh all`), the Lambda doesn't exist yet at step 2, so the redeploy is skipped. Lambda gets deployed normally at step 4.
+
+### Guardrail Versioning Strategy
+
+- **CloudFormation** manages the guardrail configuration (content filters, PII entities, word policy, regex patterns)
+- **CLI** creates published versions (`aws bedrock create-guardrail-version`) — this preserves all old versions for rollback
+- **SSM Parameter Store** holds the active version number that Lambda reads at runtime
+- To rollback: update SSM `/ai-content-guard/guardrail/version` to an older version number
+
+### Lambda Input Normalization
+
+Before sending text to the guardrail, Lambda normalizes it to defeat evasion tricks:
+
+| Evasion Trick | Example Input | Normalized To |
+|---------------|---------------|---------------|
+| Spaced characters | "S E X" | "SEX" |
+| Dot-separated | "S.E.X" | "SEX" |
+| Special chars between letters | "f*ck", "s#it" | "fck", "sit" |
+| Leet-speak | "s3x", "p0rn" | "sex", "porn" |
+| Repeated characters | "fuuuck", "sexxxx" | "fuck", "sex" |
+| Letter-swap anagrams | "FCUK", "SXE" | appends "fuck", "sex" for guardrail to catch |
+
+This ensures the word policy catches all variations without needing to manually list every evasion pattern.

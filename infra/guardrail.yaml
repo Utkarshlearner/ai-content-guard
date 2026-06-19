@@ -42,7 +42,7 @@ Resources:
             InputStrength: HIGH
             OutputStrength: HIGH
           - Type: PROMPT_ATTACK
-            InputStrength: HIGH
+            InputStrength: MEDIUM
             OutputStrength: NONE
       SensitiveInformationPolicyConfig:
         PiiEntitiesConfig:
@@ -213,14 +213,26 @@ Resources:
           - Text: naked
           - Text: xxx
           - Text: fuck
+          - Text: fcuk
+          - Text: fck
+          - Text: fuk
+          - Text: fuq
+          - Text: phuck
           - Text: shit
+          - Text: sht
+          - Text: sh1t
           - Text: dick
+          - Text: d1ck
           - Text: pussy
+          - Text: puss
           - Text: ass
+          - Text: a$$
           - Text: bitch
+          - Text: b1tch
           - Text: rape
           - Text: molest
           - Text: pedophile
+          - Text: paedophile
           - Text: kill yourself
           - Text: suicide method
           - Text: how to make bomb
@@ -239,12 +251,6 @@ Resources:
         - Key: Application
           Value: AI-Content-Guard
 
-  GuardrailVersion:
-    Type: AWS::Bedrock::GuardrailVersion
-    Properties:
-      GuardrailIdentifier: !GetAtt ContentGuardrail.GuardrailId
-      Description: v4 - Comprehensive regex for all date formats, age variants, zip codes, phone intl, social handles, room numbers, topic policies
-
   # SSM Parameters for Guardrail ID and Version
   GuardrailIdParameter:
     Type: AWS::SSM::Parameter
@@ -253,20 +259,6 @@ Resources:
       Type: String
       Value: !GetAtt ContentGuardrail.GuardrailId
       Description: Bedrock Guardrail ID for AI Content Guard
-      Tags:
-        Project: !Ref ProjectName
-        Environment: !Ref Environment
-        Owner: !Ref Owner
-        ManagedBy: CloudFormation
-        Application: AI-Content-Guard
-
-  GuardrailVersionParameter:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: !Sub '/${ProjectName}/guardrail/version'
-      Type: String
-      Value: !GetAtt GuardrailVersion.Version
-      Description: Bedrock Guardrail version for AI Content Guard
       Tags:
         Project: !Ref ProjectName
         Environment: !Ref Environment
@@ -299,11 +291,6 @@ Outputs:
     Value: !GetAtt ContentGuardrail.GuardrailArn
     Export:
       Name: !Sub '${ProjectName}-guardrail-arn'
-  GuardrailVersion:
-    Description: Version of the Bedrock Guardrail
-    Value: !GetAtt GuardrailVersion.Version
-    Export:
-      Name: !Sub '${ProjectName}-guardrail-version'
   GuardrailIdSSMParam:
     Description: SSM Parameter path for Guardrail ID
     Value: !Sub '/${ProjectName}/guardrail/id'
